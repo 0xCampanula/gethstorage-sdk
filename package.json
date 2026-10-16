@@ -1,7 +1,10 @@
 {
   "name": "calldatauploader-sdk",
-  "version": "5.0.0",
+  "version": "5.0.1",
   "description": "EthStorage flat directory upload sdk (calldata only)",
+  "files": [
+    "dist"
+  ],
   "main": "./dist/node/index.cjs",
   "types": "./dist/node/index.d.ts",
   "exports": {
