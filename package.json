@@ -1,6 +1,6 @@
 {
-  "name": "calldatauploader-sdk",
-  "version": "5.0.1",
+  "name": "gethstorage-sdk",
+  "version": "5.0.2",
   "description": "EthStorage flat directory upload sdk (calldata only)",
   "files": [
     "dist"
@@ -37,12 +37,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/0xCampanula/calldatauploader-sdk.git"
+    "url": "git+https://github.com/0xCampanula/gethstorage-sdk.git"
   },
   "bugs": {
-    "url": "https://github.com/0xCampanula/calldatauploader-sdk/issues"
+    "url": "https://github.com/0xCampanula/gethstorage-sdk/issues"
   },
-  "homepage": "https://github.com/0xCampanula/calldatauploader-sdk/main/",
+  "homepage": "https://github.com/0xCampanula/gethstorage-sdk/main/",
   "keywords": [
     "File",
     "Upload"

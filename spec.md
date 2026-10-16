@@ -143,7 +143,7 @@ console.log(`Gas Cost: ${cost.gasCost}, Storage Cost: ${cost.storageCost}`);
 
 Node.js
 ```javascript
-const {NodeFile} = require("calldatauploader-sdk/file");
+const {NodeFile} = require("gethstorage-sdk/file");
 const file = new NodeFile("/usr/download/test.jpg");
 
 const request = {
@@ -226,7 +226,7 @@ await flatDirectory.upload(request);
 
 Node.js
 ```javascript
-const {NodeFile} = require("calldatauploader-sdk/file");
+const {NodeFile} = require("gethstorage-sdk/file");
 const file = new NodeFile("/usr/download/test.jpg");
 
 const request = {

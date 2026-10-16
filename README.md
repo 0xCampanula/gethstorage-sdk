@@ -1,4 +1,4 @@
-# calldatauploader-sdk
+# gethstorage-sdk
 
 This SDK aims to standardize the interaction between applications and the EthStorage network to achieve reliable and
 efficient data management functionality.
@@ -10,10 +10,10 @@ Click here to view [spec](./spec.md).
 
 # Installation
 
-Install the SDK using [npm](https://www.npmjs.com/package/calldatauploader-sdk):
+Install the SDK using [npm](https://www.npmjs.com/package/gethstorage-sdk):
 
 ```bash
-$ npm install calldatauploader-sdk
+$ npm install gethstorage-sdk
 ```
 
 # Example Usage
@@ -25,7 +25,7 @@ $ npm install calldatauploader-sdk
 Create a `FlatDirectory` instance.
 
 ```js
-const { FlatDirectory } = require("calldatauploader-sdk");
+const { FlatDirectory } = require("gethstorage-sdk");
 
 const rpc = "https://rpc.beta.testnet.l2.quarkchain.io:8545";
 const ethStorageRpc = "https://rpc.beta.testnet.l2.ethstorage.io:9596";
@@ -113,7 +113,7 @@ await flatDirectory.upload(request);
 
 Node.js
 ```javascript
-const {NodeFile} = require("calldatauploader-sdk/file");
+const {NodeFile} = require("gethstorage-sdk/file");
 const file = new NodeFile("/usr/download/test.jpg");
 
 const request = {
@@ -174,7 +174,7 @@ console.log(`Gas Cost: ${cost.gasCost}, Storage Cost: ${cost.storageCost}`);
 
 Node.js
 ```javascript
-const {NodeFile} = require("calldatauploader-sdk/file");
+const {NodeFile} = require("gethstorage-sdk/file");
 const file = new NodeFile("/usr/download/test.jpg");
 
 const request = {
