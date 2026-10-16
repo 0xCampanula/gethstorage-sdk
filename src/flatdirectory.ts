@@ -10,7 +10,6 @@ import {
 } from "./param";
 import {
     TxSender,
-    getChainId,
     isBuffer, isFile,
     stringToHex,
     stableRetry, getContentChunk,
@@ -26,7 +25,6 @@ const defaultCallback: DownloadCallback = {
 
 export class FlatDirectory {
     // ======================= Private fields =======================
-    #rpc?: string;
     #ethStorageRpc?: string;
     #contractAddr?: string;
 
@@ -60,18 +58,28 @@ export class FlatDirectory {
      * @returns Contract address if successful, null otherwise
      */
     async deploy(): Promise<string | null> {
-        const chainId = await getChainId(this.#rpcChecked);
+        const chainId = await this.#txSenderChecked.getChainId();
 
         const ethStorage = ETHSTORAGE_MAPPING[chainId] || '0x0000000000000000000000000000000000000000';
-        const factory = new ethers.ContractFactory(FlatDirectoryAbi, FlatDirectoryBytecode, this.#walletChecked);
         try {
+            // Route through TxSender so deploy uses the same chain-class gas fees
+            // and retry logic as upload transactions.
+            const factory = new ethers.ContractFactory(FlatDirectoryAbi, FlatDirectoryBytecode);
             // @ts-ignore
-            const contract = await factory.deploy(0, CONTRACT_MAX_CHUNK_SIZE, ethStorage);
-            await contract.waitForDeployment();
+            const tx = await factory.getDeployTransaction(0, CONTRACT_MAX_CHUNK_SIZE, ethStorage);
+            const resolvedFees = await this.#txSenderChecked.resolveGasFees();
+            this.#applyGasFees(tx, resolvedFees);
+            const txResponse = await this.#txSenderChecked.sendTx(tx);
+            this.#log(`Deploy transaction sent. Hash: ${txResponse.hash}`);
 
-            this.#contractAddr = await contract.getAddress();
-            this.#log(`Contract deployed successfully. Address: ${this.#contractAddr}`);
-            return this.#contractAddr as string;
+            const receipt = await this.#txSenderChecked.waitForReceipt(txResponse.hash);
+            if (receipt?.status === 1 && receipt.contractAddress) {
+                this.#contractAddr = receipt.contractAddress;
+                this.#log(`Contract deployed successfully. Address: ${this.#contractAddr}`);
+                return this.#contractAddr;
+            }
+            this.#log(`Deployment failed! Transaction reverted (Hash: ${txResponse.hash})`, true);
+            return null;
         } catch (e) {
             this.#log(`Deployment failed! ${(e as any).message || e}`, true);
             return null;
@@ -87,10 +95,13 @@ export class FlatDirectory {
         const hexName = filename ? stringToHex(filename) : "0x";
         const fileContract = new ethers.Contract(this.#contractAddrChecked, FlatDirectoryAbi, this.#walletChecked) as any;
         try {
-            const tx = await fileContract.setDefault(hexName);
-            this.#log(`Setting default file (Key: ${filename}). Transaction sent (Hash: ${tx.hash})`);
-            const txReceipt = await tx.wait();
-            return txReceipt.status === 1;
+            const tx = await fileContract["setDefault"].populateTransaction(hexName);
+            const resolvedFees = await this.#txSenderChecked.resolveGasFees();
+            this.#applyGasFees(tx, resolvedFees);
+            const txResponse = await this.#txSenderChecked.sendTx(tx);
+            this.#log(`Setting default file (Key: ${filename}). Transaction sent (Hash: ${txResponse.hash})`);
+            const result = await this.#txSenderChecked.getTransactionResult(txResponse.hash);
+            return result.success;
         } catch (e) {
             this.#log(`Failed to set default file (Key: ${filename}). ${(e as any).message || e}`, true);
         }
@@ -105,10 +116,13 @@ export class FlatDirectory {
     async remove(key: string): Promise<boolean> {
         const fileContract = new ethers.Contract(this.#contractAddrChecked, FlatDirectoryAbi, this.#walletChecked) as any;
         try {
-            const tx = await fileContract.remove(stringToHex(key));
-            this.#log(`File removal initiated (Key: ${key}). Hash: ${tx.hash}`);
-            const receipt = await tx.wait();
-            return receipt.status === 1;
+            const tx = await fileContract["remove"].populateTransaction(stringToHex(key));
+            const resolvedFees = await this.#txSenderChecked.resolveGasFees();
+            this.#applyGasFees(tx, resolvedFees);
+            const txResponse = await this.#txSenderChecked.sendTx(tx);
+            this.#log(`File removal initiated (Key: ${key}). Hash: ${txResponse.hash}`);
+            const result = await this.#txSenderChecked.getTransactionResult(txResponse.hash);
+            return result.success;
         } catch (e) {
             this.#log(`Failed to remove file (Key: ${key}). ${(e as any).message || e}`, true);
         }
@@ -203,7 +217,6 @@ export class FlatDirectory {
     // -------------------- Private Methods --------------------
     async #initialize(config: SDKConfig): Promise<void> {
         const { privateKey, rpc, address, ethStorageRpc } = config;
-        this.#rpc = rpc;
         this.#contractAddr = address;
         this.#ethStorageRpc = ethStorageRpc;
 
@@ -628,11 +641,6 @@ export class FlatDirectory {
     get #ethStorageRpcChecked(): string {
         if (!this.#ethStorageRpc) throw new Error("FlatDirectory: 'ethStorageRpc' required.");
         return this.#ethStorageRpc;
-    }
-
-    get #rpcChecked(): string {
-        if (!this.#rpc) throw new Error("FlatDirectory: 'rpc' required.");
-        return this.#rpc;
     }
 
     get #walletChecked(): ethers.Wallet {

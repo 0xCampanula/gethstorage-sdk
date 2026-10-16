@@ -31,10 +31,11 @@ export class NodeFile {
 
         assertArgument(fs.existsSync(filePath), "invalid file path", "file", filePath);
         const stat = fs.statSync(filePath);
+        assertArgument(stat.size > 0, "file is empty (0 bytes), nothing to upload", "file", filePath);
         this.start = Math.min(start, stat.size - 1);
         this.end = end == 0 ? stat.size : Math.min(end, stat.size);
         this.size = this.end - this.start;
-        assertArgument(this.size > 0, "invalid file size", "file", this.size);
+        assertArgument(this.size > 0, "invalid slice range: start exceeds file size", "file", this.size);
     }
 
     slice(start: number, end: number): NodeFile {

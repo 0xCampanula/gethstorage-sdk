@@ -22,7 +22,7 @@ export class TxSender {
         this.#wallet = new ethers.Wallet(privateKey, this.#provider);
     }
 
-    async #getChainId(): Promise<number> {
+    async getChainId(): Promise<number> {
         if (this.#chainId === undefined) {
             const network = await stableRetry(() => this.#provider.getNetwork());
             this.#chainId = Number(network.chainId);
@@ -55,7 +55,7 @@ export class TxSender {
      * price actually charged per gas unit.
      */
     async resolveGasFees(custom: GasFeeOptions = {}): Promise<ResolvedGasFees> {
-        const chainId = await this.#getChainId();
+        const chainId = await this.getChainId();
         const isLegacyChain = LEGACY_GAS_CHAIN_IDS.has(chainId);
         let baseFee = isLegacyChain ? null : await this.getBaseFee();
 
@@ -90,9 +90,13 @@ export class TxSender {
         throw new Error("Failed to resolve gas fees: the network provides neither base fee nor gas price.");
     }
 
-    async getTransactionResult(hash: string): Promise<UploadResult> {
+    async waitForReceipt(hash: string): Promise<ethers.TransactionReceipt | null> {
         if (!hash || !ethers.isHexString(hash)) throw new Error("Invalid transaction hash");
-        const receipt = await stableRetry(() => this.#provider.waitForTransaction(hash));
+        return await stableRetry(() => this.#provider.waitForTransaction(hash));
+    }
+
+    async getTransactionResult(hash: string): Promise<UploadResult> {
+        const receipt = await this.waitForReceipt(hash);
         return {txCost: calcTxCost(receipt), success: receipt?.status === 1};
     }
 
