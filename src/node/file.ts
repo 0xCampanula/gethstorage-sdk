@@ -61,10 +61,4 @@ export class NodeFile {
         const buffer = await this.arrayBuffer();
         return new TextDecoder().decode(buffer);
     }
-
-    stream(): fs.ReadStream {
-        const start = this.start;
-        const end = this.end;
-        return fs.createReadStream(this.filePath, { start, end });
-    }
 }

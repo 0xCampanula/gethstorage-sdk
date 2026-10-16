@@ -599,14 +599,13 @@ export class FlatDirectory {
         tx.maxPriorityFeePerGas = resolvedFees.maxPriorityFeePerGas;
     }
 
-    #logTransactionHash(key: string, chunkIds: number[] | number, hash: string, callback: UploadCallback) {
-        const ids = Array.isArray(chunkIds) ? chunkIds.join(",") : chunkIds;
-        const primaryMessage = `Transaction hash: ${hash} for chunk(s) ${ids}.`;
+    #logTransactionHash(key: string, chunkId: number, hash: string, callback: UploadCallback) {
+        const primaryMessage = `Transaction hash: ${hash} for chunk ${chunkId}.`;
         const fullMessage = `${primaryMessage} (Key: ${key})`;
         this.#log(fullMessage);
 
         if (callback?.onTransactionSent) {
-            callback.onTransactionSent(hash, chunkIds);
+            callback.onTransactionSent(hash, chunkId);
         }
     }
 
