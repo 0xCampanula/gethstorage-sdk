@@ -1,7 +1,3 @@
-import { ethers } from "ethers";
-import { UploadType } from "./constant";
-
-
 // NodeFile Type
 export interface NodeFile {
     isNodeJs: boolean;
@@ -41,16 +37,43 @@ export interface DownloadCallback {
     onFinish: () => void;
 }
 
+/**
+ * Custom gas fees, in wei.
+ * EIP-1559 fields apply to EIP-1559 chains; gasPrice applies to legacy chains
+ * (e.g. BNB Chain). Unset fields fall back to chain-class defaults.
+ */
+export interface GasFeeOptions {
+    maxFeePerGas?: bigint,
+    maxPriorityFeePerGas?: bigint,
+    gasPrice?: bigint,
+}
+
+/**
+ * Concrete fees resolved for a transaction, tagged by fee model.
+ * effectiveGasPrice is the expected price actually charged per gas unit:
+ * min(maxFeePerGas, baseFee + priorityFee) under EIP-1559, gasPrice on legacy chains.
+ */
+export type ResolvedGasFees =
+    | { type: 'eip1559', maxFeePerGas: bigint, maxPriorityFeePerGas: bigint, effectiveGasPrice: bigint }
+    | { type: 'legacy', gasPrice: bigint, effectiveGasPrice: bigint };
+
 export interface EstimateGasRequest {
     key: string,
     content: ContentLike,
-    type: UploadType,
-    gasIncPct?: number,
+    /** Custom max fee per gas, in wei (EIP-1559). */
+    maxFeePerGas?: bigint,
+    /** Custom priority fee per gas, in wei (EIP-1559). */
+    maxPriorityFeePerGas?: bigint,
+    /** Custom gas price, in wei (legacy chains without EIP-1559, e.g. BNB Chain). */
+    gasPrice?: bigint,
     chunkHashes?: string[],
+    /** Size of each data chunk, in KB. Defaults to DEFAULT_MAX_CHUNK_SIZE_KB. */
+    maxChunkSize?: number,
+    /** Maximum number of chunks requested in a single call. Defaults to MAX_CHUNKS. */
+    maxChunks?: number,
 }
 
 export interface UploadRequest extends EstimateGasRequest {
-    isConfirmedNonce?: boolean,
     callback: Partial<UploadCallback>,
 }
 
@@ -61,7 +84,6 @@ export interface CostEstimate {
 
 export interface TxCost {
     normalGasCost: bigint;
-    blobGasCost: bigint;
 }
 
 export interface UploadResult {
@@ -78,8 +100,6 @@ export interface UploadDetails {
     fileMode: number;
     oldChunkCount: number;
     cost: bigint;
-    gasFeeData?: ethers.FeeData,
-    maxFeePerBlobGas?: bigint,
 }
 
 export interface ChunkCountResult {

@@ -37,46 +37,14 @@ export function isNodejs(): boolean {
     return typeof process !== 'undefined' && !!process.versions && !!process.versions.node;
 }
 
-export function computeVersionedCommitmentHash(commitment: Uint8Array): Uint8Array {
-    const computedVersionedHash = new Uint8Array(32);
-    computedVersionedHash.set([0x01], 0);
-    const hash = ethers.getBytes(ethers.sha256(commitment));
-    computedVersionedHash.set(hash.subarray(1), 1);
-    return computedVersionedHash;
-}
-
-export function convertToEthStorageHash(commitment: Uint8Array): string {
-    const localHash = computeVersionedCommitmentHash(commitment);
-    const hash = new Uint8Array(32);
-    hash.set(localHash.subarray(0, 32 - 8));
-    return ethers.hexlify(hash);
-}
-
-export function convertToEthStorageHashes(commitments: Uint8Array[]): string[] {
-    return commitments.map(commitment => convertToEthStorageHash(commitment));
-}
-
-export function copy(des: Uint8Array, desOff: number, src: Uint8Array, srcOff: number): number {
-    const srcLength = src.length - srcOff;
-    const desLength = des.length - desOff;
-    const length = Math.min(srcLength, desLength);
-    des.set(src.subarray(srcOff, srcOff + length), desOff);
-    return length;
-}
-
 export function calcTxCost(receipt: ethers.TransactionReceipt | null): TxCost {
     if (!receipt) {
-        return { normalGasCost: 0n, blobGasCost: 0n };
+        return { normalGasCost: 0n };
     }
 
     // gas cost
     const normalGasCost: bigint = receipt.gasUsed * receipt.gasPrice;
-    // blob gas cost
-    const blobGasCost: bigint = receipt.blobGasUsed && receipt.blobGasPrice
-        ? BigInt(receipt.blobGasUsed) * BigInt(receipt.blobGasPrice)
-        : 0n;
     return {
         normalGasCost,
-        blobGasCost,
     };
 }

@@ -30,7 +30,7 @@ export default defineConfig([
         dts: true,
         sourcemap: false,
         clean: false,
-        external: ['ethers', 'js-kzg'],
+        external: ['ethers'],
         noExternal: ['p-limit'],
         outDir: 'dist/node',
         outExtension({ format }) {

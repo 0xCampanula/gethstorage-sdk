@@ -1,7 +1,7 @@
 {
-  "name": "ethstorage-sdk",
-  "version": "4.2.5",
-  "description": "eip-4844 blobs upload sdk",
+  "name": "calldatauploader-sdk",
+  "version": "5.0.0",
+  "description": "EthStorage flat directory upload sdk (calldata only)",
   "main": "./dist/node/index.cjs",
   "types": "./dist/node/index.d.ts",
   "exports": {
@@ -23,30 +23,24 @@
     }
   },
   "scripts": {
-    "build": "rm -rf dist && tsup",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsup",
     "dev": "tsup --watch --env.NODE_ENV development",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "async-mutex": "^0.5.0",
     "dotenv": "^16.4.5",
     "ethers": "^6.17.0",
-    "js-kzg": "^2.0.2",
-    "p-limit": "^7.2.0",
-    "rxjs": "^7.8.2"
+    "p-limit": "^7.2.0"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ethstorage/ethstorage-sdk.git"
+    "url": "git+https://github.com/0xCampanula/calldatauploader-sdk.git"
   },
   "bugs": {
-    "url": "https://github.com/ethstorage/ethstorage-sdk/issues"
+    "url": "https://github.com/0xCampanula/calldatauploader-sdk/issues"
   },
-  "homepage": "https://github.com/ethstorage/ethstorage-sdk/main/",
+  "homepage": "https://github.com/0xCampanula/calldatauploader-sdk/main/",
   "keywords": [
-    "EIP4844",
-    "eip-4844",
-    "Blobs",
     "File",
     "Upload"
   ],

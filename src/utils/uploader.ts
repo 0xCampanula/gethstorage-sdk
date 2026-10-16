@@ -1,117 +1,93 @@
 import { ethers } from "ethers";
-import { Mutex } from "async-mutex";
-import { KZG } from "js-kzg";
-import {
-    calcTxCost, computeVersionedCommitmentHash,
-    convertToEthStorageHashes
-} from "./util";
+import { calcTxCost } from "./util";
 import { stableRetry } from "./retry";
-import { UploadResult } from "../param";
-
-// ====================== Constants ======================
-const BLOB_TX = {
-    TYPE: 3 as const,
-    WRAPPER_VERSION: 1 as const,
-    DEFAULT_GAS_INC_PCT: 0 as const,
-};
-
-export const EMPTY_BLOB_CONSTANTS = {
-    // 128KB full 0
-    DATA: new Uint8Array(131072),
-    COMMITMENT: ethers.getBytes("0xc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
-};
-
-// ====================== KZG Helper ======================
-/**
- * Handles KZG initialization (lazy loading) and computations.
- */
-class KzgHelper {
-    #instance: KZG | null = null;
-    #initPromise: Promise<KZG> | null = null;
-
-    async getInstance(): Promise<KZG> {
-        if (this.#instance) return this.#instance;
-
-        if (!this.#initPromise) {
-            this.#initPromise = this.#initialize();
-        }
-        return this.#initPromise!;
-    }
-
-    async #initialize(): Promise<KZG> {
-        const kzg = await KZG.create();
-        this.#instance = kzg;
-        return kzg;
-    }
-
-    async computeCommitments(blobs: Uint8Array[]): Promise<Uint8Array[]> {
-        const kzg = await this.getInstance();
-        const hex = await kzg.computeCommitmentBatch(blobs);
-        return hex.map((h) => ethers.getBytes(h));
-    }
-
-    async computeCellProofs(blobs: Uint8Array[]): Promise<ethers.BytesLike[]> {
-        const kzg = await this.getInstance();
-        const proofs = await kzg.computeCellsProofsBatch(blobs);
-        return proofs.map((p) => ethers.concat(p));
-    }
-
-    async destroy() {
-        if (this.#instance) {
-            await this.#instance.terminate();
-            this.#instance = null;
-            this.#initPromise = null;
-        }
-    }
-}
-
-// ====================== Types ======================
-type SendTxParams = {
-    tx: ethers.TransactionRequest;
-    confirmNonce: boolean;
-};
-
-type BuildBlobTxParams = {
-    baseTx: ethers.TransactionRequest;
-    blobs: Uint8Array[];
-    commitments?: Uint8Array[];
-    gasIncPct?: number;
-};
+import { UploadResult, GasFeeOptions, ResolvedGasFees, DEFAULT_PRIORITY_FEE_PER_GAS,
+    BASE_FEE_MULTIPLIER_NUMERATOR, BASE_FEE_MULTIPLIER_DENOMINATOR,
+    LEGACY_GAS_CHAIN_IDS, AVALANCHE_GAS_CHAIN_IDS, AVALANCHE_MIN_BASE_FEE_PER_GAS } from "../param";
 
 // ====================== Main Class ======================
-export class BlobUploader {
+/**
+ * Generic transaction sender: owns the provider and wallet, and exposes
+ * gas price / send / receipt helpers used by the calldata upload path.
+ * Transactions are sent strictly one at a time; callers must await
+ * confirmation before sending the next transaction.
+ */
+export class TxSender {
     readonly #provider: ethers.JsonRpcProvider;
     readonly #wallet: ethers.Wallet;
-    // Mutex for serializing nonce fetching and transaction submission
-    readonly #mutex = new Mutex();
-    // KZG Helper for lazy initialization and computation
-    readonly #kzg = new KzgHelper();
+    #chainId?: number;
 
     constructor(rpc: string, privateKey: string) {
         this.#provider = new ethers.JsonRpcProvider(rpc);
         this.#wallet = new ethers.Wallet(privateKey, this.#provider);
     }
 
-    // ====================== Gas API ======================
-    async getBlobGasPrice(): Promise<bigint> {
-        const base = await stableRetry(() => this.#provider.send("eth_blobBaseFee", []));
-        if (!base) throw new Error("RPC returned empty response");
-
-        return BigInt(base) * 20n / 10n;
+    async #getChainId(): Promise<number> {
+        if (this.#chainId === undefined) {
+            const network = await stableRetry(() => this.#provider.getNetwork());
+            this.#chainId = Number(network.chainId);
+        }
+        return this.#chainId;
     }
 
-    async getGasPrice(): Promise<ethers.FeeData> {
+    // ====================== Gas API ======================
+    async getFeeData(): Promise<ethers.FeeData> {
         return await stableRetry(() => this.#provider.getFeeData());
     }
 
-    // ====================== Blob Utility API ======================
-    async computeCommitmentsForBlobs(blobs: Uint8Array[]): Promise<Uint8Array[]> {
-        return await this.#kzg.computeCommitments(blobs);
+    /**
+     * Base fee of the latest block (EIP-1559), or null on legacy chains.
+     */
+    async getBaseFee(): Promise<bigint | null> {
+        const block = await stableRetry(() => this.#provider.getBlock('latest'));
+        return block?.baseFeePerGas ?? null;
     }
 
-    async computeEthStorageHashesForBlobs(blobs: Uint8Array[]): Promise<string[]> {
-        const com = await this.#kzg.computeCommitments(blobs);
-        return convertToEthStorageHashes(com);
+    /**
+     * Resolve concrete gas fees for a transaction, by chain fee model:
+     * - Legacy chains (no base fee, e.g. BNB Chain): a single gasPrice paid in full,
+     *   taken from the node unless overridden via custom.gasPrice.
+     * - Avalanche C-Chain: EIP-1559 with a protocol-enforced minimum base fee of
+     *   25 nAVAX; the node-reported base fee is clamped to that floor.
+     * - Other (EIP-1559) chains: tip defaults to 100 wei,
+     *   maxFeePerGas defaults to 1.1 * baseFee + tip (baseFee from the latest block).
+     * Caller-provided fields take precedence. effectiveGasPrice is the expected
+     * price actually charged per gas unit.
+     */
+    async resolveGasFees(custom: GasFeeOptions = {}): Promise<ResolvedGasFees> {
+        const chainId = await this.#getChainId();
+        const isLegacyChain = LEGACY_GAS_CHAIN_IDS.has(chainId);
+        let baseFee = isLegacyChain ? null : await this.getBaseFee();
+
+        // Avalanche C-Chain enforces a minimum base fee of 25 nAVAX; clamp to the
+        // floor so an under-reporting RPC can never yield an under-priced cap.
+        if (AVALANCHE_GAS_CHAIN_IDS.has(chainId) &&
+            (baseFee == null || baseFee < AVALANCHE_MIN_BASE_FEE_PER_GAS)) {
+            baseFee = AVALANCHE_MIN_BASE_FEE_PER_GAS;
+        }
+
+        if (baseFee != null) {
+            const maxPriorityFeePerGas = custom.maxPriorityFeePerGas ?? DEFAULT_PRIORITY_FEE_PER_GAS;
+            const bufferedBaseFee = (baseFee * BASE_FEE_MULTIPLIER_NUMERATOR) / BASE_FEE_MULTIPLIER_DENOMINATOR;
+            const maxFeePerGas = custom.maxFeePerGas ?? (bufferedBaseFee + maxPriorityFeePerGas);
+            const baseAndTip = baseFee + maxPriorityFeePerGas;
+            const effectiveGasPrice = maxFeePerGas < baseAndTip ? maxFeePerGas : baseAndTip;
+            return { type: 'eip1559', maxFeePerGas, maxPriorityFeePerGas, effectiveGasPrice };
+        }
+
+        // Legacy model (known legacy chain, or no base fee reported): a single gas price.
+        const feeData = await this.getFeeData();
+        const gasPrice = custom.gasPrice ?? feeData.gasPrice;
+        if (gasPrice != null) {
+            return { type: 'legacy', gasPrice, effectiveGasPrice: gasPrice };
+        }
+        // Last resort for chains that report no base fee but suggest EIP-1559 fields.
+        if (feeData.maxFeePerGas != null && feeData.maxPriorityFeePerGas != null) {
+            const maxFeePerGas = custom.maxFeePerGas ?? feeData.maxFeePerGas;
+            const maxPriorityFeePerGas = custom.maxPriorityFeePerGas ?? feeData.maxPriorityFeePerGas;
+            return { type: 'eip1559', maxFeePerGas, maxPriorityFeePerGas, effectiveGasPrice: maxFeePerGas };
+        }
+        throw new Error("Failed to resolve gas fees: the network provides neither base fee nor gas price.");
     }
 
     async getTransactionResult(hash: string): Promise<UploadResult> {
@@ -120,114 +96,13 @@ export class BlobUploader {
         return {txCost: calcTxCost(receipt), success: receipt?.status === 1};
     }
 
-    /**
-     * Computes KZG commitments and cell proofs for the given blobs,
-     * then constructs an EIP-4844 transaction request with the corresponding fields.
-     */
-    async buildBlobTx(params: BuildBlobTxParams): Promise<ethers.TransactionRequest> {
-        const {baseTx, blobs, commitments, gasIncPct = BLOB_TX.DEFAULT_GAS_INC_PCT} = params;
-        if (gasIncPct < 0) {
-            throw new Error("Gas increase percentage cannot be negative");
-        }
-
-        // blob
-        const fullCommitments = commitments?.length === blobs.length
-            ? commitments : await this.#kzg.computeCommitments(blobs);
-        const cellProofs = await this.#kzg.computeCellProofs(blobs);
-
-        const ethersBlobs: ethers.BlobLike[] = blobs.map((blob, i) => ({
-            data: blob,
-            commitment: fullCommitments[i],
-            proof: cellProofs[i],
-        }));
-
-        // Compute Versioned Hashes from Commitments
-        const versionedHashes = fullCommitments.map((c) =>
-            ethers.hexlify(computeVersionedCommitmentHash(c as Uint8Array))
-        );
-
-        const tx: ethers.TransactionRequest = {
-            ...baseTx,
-            type: BLOB_TX.TYPE,
-            blobWrapperVersion: BLOB_TX.WRAPPER_VERSION,
-            blobVersionedHashes: versionedHashes,
-            blobs: ethersBlobs,
-
-            maxFeePerBlobGas: baseTx.maxFeePerBlobGas ?? (await this.getBlobGasPrice()),
-        };
-
-        // optionally bump gas
-        if (gasIncPct > 0) {
-            const feeData = await this.getGasPrice();
-            tx.maxFeePerGas = feeData.maxFeePerGas! * BigInt(100 + gasIncPct) / BigInt(100);
-            tx.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas! * BigInt(100 + gasIncPct) / BigInt(100);
-            tx.maxFeePerBlobGas = BigInt(tx.maxFeePerBlobGas!) * BigInt(100 + gasIncPct) / BigInt(100);
-        }
-
-        return tx;
-    }
-
     // ====================== Public Send API ======================
     /**
-     * Sends a transaction without using the Mutex lock.
+     * Sends a single transaction. No locking or manual nonce management:
+     * uploads are strictly sequential, so the wallet's automatic nonce
+     * handling is always up to date.
      */
     async sendTx(tx: ethers.TransactionRequest): Promise<ethers.TransactionResponse> {
-        return this.#send({tx, confirmNonce: false});
-    }
-
-    /**
-     * Sends a transaction using the Mutex lock to ensure sequential submission.
-     */
-    async sendTxLock(
-        tx: ethers.TransactionRequest,
-        confirmNonce: boolean,
-    ): Promise<ethers.TransactionResponse> {
-        return this.#send({tx, confirmNonce, useLock: true});
-    }
-
-    /**
-     * Cleans up resources, specifically terminating the KZG WASM instance.
-     */
-    async close() {
-        await this.#kzg.destroy();
-    }
-
-    // ====================== Internal Core Logic ======================
-    /**
-     * Core handler: Prepares blob data (if needed), applies lock (if requested), and sends.
-     */
-    async #send(params: SendTxParams & { useLock?: boolean }): Promise<ethers.TransactionResponse> {
-        const {tx, useLock = false, confirmNonce} = params;
-
-        // Atomic Submission (Locked if requested)
-        if (useLock) {
-            const release = await this.#mutex.acquire();
-            try {
-                return await this.#atomicSend(tx, confirmNonce);
-            } finally {
-                release();
-            }
-        }
-
-        // Unlocked submission
-        return this.#atomicSend(tx, confirmNonce);
-    }
-
-    /**
-     * Handles nonce management and transaction submission.
-     */
-    async #atomicSend(
-        tx: ethers.TransactionRequest,
-        confirmNonce: boolean
-    ): Promise<ethers.TransactionResponse> {
-        return stableRetry(async () => {
-            if (confirmNonce) {
-                tx.nonce = await this.#provider.getTransactionCount(
-                    this.#wallet.address,
-                    "latest"
-                );
-            }
-            return this.#wallet.sendTransaction(tx);
-        });
+        return stableRetry(() => this.#wallet.sendTransaction(tx));
     }
 }

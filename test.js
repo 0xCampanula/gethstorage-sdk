@@ -1,67 +1,11 @@
-const {EthStorage, FlatDirectory, DecodeType} = require("./dist/node/index.cjs");
-const {NodeFile} = require("./dist/node/file.cjs");
-const fs = require('fs');
-const os = require('os');
-const {ethers} = require('ethers');
+const { FlatDirectory } = require("./dist/node/index.cjs");
+const { NodeFile } = require("./dist/node/file.cjs");
 
 const dotenv = require("dotenv")
 dotenv.config()
 const privateKey = process.env.pk;
 
 const filePath = '/Users/lmp/Downloads/dist/img122.jpeg';
-const filePath2 = '/Users/lmp/Downloads/dist/img123.jpeg';
-const name = filePath.substring(filePath.lastIndexOf("/") + 1);
-
-const saveFile = (data) => {
-    const exp = new Date();
-    const path = `${os.tmpdir()}/${exp.getTime()}`;
-    fs.writeFileSync(path, data);
-    return path;
-}
-
-async function EthStorageTest() {
-    const es = await EthStorage.create({
-        rpc: 'http://65.108.230.142:8545/',
-        ethStorageRpc: 'https://rpc.testnet.ethstorage.io:9546',
-        privateKey
-    })
-
-    const content = fs.readFileSync(filePath);
-    // estimate cost
-    const cost = await es.estimateCost(name, content.length > 126976 ? content.subarray(0, 126976) : content);
-    console.log("cost:", cost)
-
-    // write
-    let result = await es.write(name, content.length > 126976 ? content.subarray(0, 126976) : content);
-    console.log("status:", result.success, result.hash);
-    // read
-    setTimeout(() => {}, 2000);
-    let buff = await es.read(name);
-    const p = saveFile(buff);
-    console.log(p)
-
-    // put blobs
-    const keys = ["key1", "key2"];
-    const blobData = [Buffer.from("some data1"), Buffer.from("some data2")];
-    result = await es.writeBlobs(keys, blobData);
-    console.log("status:", result.success, result.hash);
-    // read
-    setTimeout(() => {}, 2000);
-    buff = await es.read('key2');
-    console.log(Buffer.from(buff).toString());
-    await es.close();
-
-    // only read
-    const readEs = await EthStorage.create({
-        rpc: 'http://65.108.230.142:8545/',
-        ethStorageRpc: 'https://rpc.testnet.ethstorage.io:9546',
-    })
-    // read
-    const wallet = new ethers.Wallet(privateKey);
-    buff = await readEs.read('key2', DecodeType.OptimismCompact, wallet.address);
-    console.log(Buffer.from(buff).toString());
-    await readEs.close();
-}
 
 async function FlatDirectoryTest() {
     const fd = await FlatDirectory.create({
@@ -85,16 +29,16 @@ async function FlatDirectoryTest() {
         }
     };
 
-    const hashes = await fd.fetchHashes(["file.jpg", "blobFile.jpg"]);
+    const hashes = await fd.fetchHashes(["file.jpg"]);
     console.log(hashes);
 
     // calldata
     // data
     let request = {
-        type: 1,
         key: "data",
         content: Buffer.from("12345678"),
-        gasIncPct: 10,
+        maxFeePerGas: 30000000000n, // 30 gwei, in wei
+        maxPriorityFeePerGas: 1500000000n, // 1.5 gwei, in wei
         callback: uploadCallback
     }
     let cost = await fd.estimateCost(request);
@@ -107,44 +51,11 @@ async function FlatDirectoryTest() {
     // file
     let file = new NodeFile(filePath);
     request = {
-        type: 1,
         key: "file.jpg",
         content: file,
-        gasIncPct: 10,
-        callback: uploadCallback
-    }
-    cost = await fd.estimateCost(request);
-    console.log(cost);
-    await fd.upload(request);
-    cost = await fd.estimateCost(request);
-    console.log(cost);
-    console.log("");
-
-
-    // blob
-    // data
-    request = {
-        type: 2,
-        key: "blobData",
-        content: Buffer.from("12345678"),
-        gasIncPct: 5,
-        callback: uploadCallback
-    }
-    cost = await fd.estimateCost(request);
-    console.log(cost);
-    await fd.upload(request);
-    cost = await fd.estimateCost(request);
-    console.log(cost);
-    console.log("");
-
-    // file
-    file = new NodeFile(filePath2);
-    request = {
-        type: 2,
-        key: "blobFile.jpg",
-        content: file,
-        gasIncPct: 5,
-        chunkHashes: hashes[1],
+        maxFeePerGas: 30000000000n, // 30 gwei, in wei
+        maxPriorityFeePerGas: 1500000000n, // 1.5 gwei, in wei
+        chunkHashes: hashes["file.jpg"],
         callback: uploadCallback
     }
     cost = await fd.estimateCost(request);
@@ -169,7 +80,7 @@ async function FlatDirectoryTest() {
             console.log('download finish');
         }
     });
-    await fd.download("blobFile.jpg", {
+    await fd.download("file.jpg", {
         onProgress: (progress, count, data) => {
             console.log(progress, count, data.length);
         },
@@ -181,17 +92,15 @@ async function FlatDirectoryTest() {
         }
     });
 
-    const hashes2 = await fd.fetchHashes(["file.jpg", "blobFile.jpg"]);
+    const hashes2 = await fd.fetchHashes(["file.jpg"]);
     console.log("get hashes", hashes2);
-
-    await fd.close();
 
     console.log("only download")
     const downloadFd = await FlatDirectory.create({
         ethStorageRpc: 'https://rpc.testnet.ethstorage.io:9546',
         address: address
     })
-    await downloadFd.download("blobFile.jpg", {
+    await downloadFd.download("file.jpg", {
         onProgress: (progress, count, data) => {
             console.log(progress, count, data.length);
         },
@@ -202,13 +111,9 @@ async function FlatDirectoryTest() {
             console.log('download finish');
         }
     });
-
-    await downloadFd.close();
 }
 
 async function main() {
-    await EthStorageTest();
     await FlatDirectoryTest();
 }
 main()
-
