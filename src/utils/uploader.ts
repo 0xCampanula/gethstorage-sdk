@@ -49,8 +49,8 @@ export class TxSender {
      *   taken from the node unless overridden via custom.gasPrice.
      * - Avalanche C-Chain: EIP-1559 with a protocol-enforced minimum base fee of
      *   25 nAVAX; the node-reported base fee is clamped to that floor.
-     * - Other (EIP-1559) chains: tip defaults to 100 wei,
-     *   maxFeePerGas defaults to 1.1 * baseFee + tip (baseFee from the latest block).
+     * - Other (EIP-1559) chains: tip defaults to 150 wei,
+     *   maxFeePerGas defaults to 1.2 * baseFee + tip (baseFee from the latest block).
      * Caller-provided fields take precedence. effectiveGasPrice is the expected
      * price actually charged per gas unit.
      */

@@ -36,14 +36,14 @@ export const DEFAULT_MAX_CHUNK_SIZE_KB: number = 64;
  * Default priority fee per gas (tip) for upload transactions, in wei.
  * Used when the caller does not provide maxPriorityFeePerGas.
  */
-export const DEFAULT_PRIORITY_FEE_PER_GAS: bigint = 100n;
+export const DEFAULT_PRIORITY_FEE_PER_GAS: bigint = 150n;
 
 /**
  * Fraction applied to the latest-block base fee when deriving the default
  * maxFeePerGas: baseFee * NUMERATOR / DENOMINATOR + priority fee.
- * 11/10 = 1.1x, leaving headroom for one ~10% base-fee increase between blocks.
+ * 12/10 = 1.2x, leaving headroom for one ~20% base-fee increase between blocks.
  */
-export const BASE_FEE_MULTIPLIER_NUMERATOR: bigint = 11n;
+export const BASE_FEE_MULTIPLIER_NUMERATOR: bigint = 12n;
 export const BASE_FEE_MULTIPLIER_DENOMINATOR: bigint = 10n;
 
 /**
