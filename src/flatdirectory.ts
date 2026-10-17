@@ -157,7 +157,7 @@ export class FlatDirectory {
     /**
      * Fetch chunk hashes for multiple files
      * @param keys - Array of file keys
-     * @param maxChunks - Maximum number of chunks requested in a single call, defaults to MAX_CHUNKS
+     * @param maxChunks - Maximum number of chunks requested in a single call, defaults to and is capped at MAX_CHUNKS
      * @returns Object mapping file keys to their chunk hashes
      */
     async fetchHashes(keys: string[], maxChunks?: number): Promise<Record<string, string[]>> {
@@ -284,7 +284,11 @@ export class FlatDirectory {
     async #fetchChunkHashes(fileInfos: ChunkCountResult[], maxChunks?: number): Promise<Record<string, string[]>> {
         const allHashes: Record<string, string[]> = {};
 
-        const chunkLimit = maxChunks && maxChunks > 0 ? maxChunks : MAX_CHUNKS;
+        // The on-chain hash query reads every requested chunk's code, so its gas
+        // grows linearly with the batch size; a few hundred chunks per call already
+        // exceeds common RPC eth_call gas limits. Hard-cap the batch size at
+        // MAX_CHUNKS regardless of the caller-provided maxChunks.
+        const chunkLimit = Math.min(maxChunks && maxChunks > 0 ? maxChunks : MAX_CHUNKS, MAX_CHUNKS);
         const batchArray: Record<string, number[]>[] = [];
         let currentBatch: Record<string, number[]> = {};
         let currentChunkCount = 0;
@@ -312,13 +316,15 @@ export class FlatDirectory {
         // request
         if (batchArray.length > 0) {
             const contract = new ethers.Contract(this.#contractAddrChecked, FlatDirectoryAbi, this.#walletChecked);
-            const hashResults = await Promise.all(batchArray.map(batch => {
+            // Serial requests: parallel batches can hit rate limits on free RPC endpoints.
+            const hashResults: ChunkHashResult[][] = [];
+            for (const batch of batchArray) {
                 const fileChunksArray: FileBatch[] = Object.keys(batch).map(name => ({
                     name,
                     chunkIds: batch[name]
                 }));
-                return getChunkHashes(contract, fileChunksArray);
-            }));
+                hashResults.push(await getChunkHashes(contract, fileChunksArray));
+            }
             // Combine results
             hashResults.flat().forEach(({ name, chunkId, hash }: ChunkHashResult) => {
                 allHashes[name][chunkId] = hash;

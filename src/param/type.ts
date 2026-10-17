@@ -69,7 +69,7 @@ export interface EstimateGasRequest {
     chunkHashes?: string[],
     /** Size of each data chunk, in KB. Defaults to DEFAULT_MAX_CHUNK_SIZE_KB. */
     maxChunkSize?: number,
-    /** Maximum number of chunks requested in a single call. Defaults to MAX_CHUNKS. */
+    /** Maximum number of chunks requested in a single call. Defaults to and is capped at MAX_CHUNKS. */
     maxChunks?: number,
 }
 
