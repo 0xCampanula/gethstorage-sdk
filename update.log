@@ -1,0 +1,18 @@
+# gethstorage-sdk 更新日志
+
+## 5.0.3
+
+- 已修复分块 0xef 开头被拒绝交易的 bug。首个分块 0xef 开头仍然会触发 bug，有极小概率会触发 bug
+
+## 5.0.2
+
+- 统一不同操作的 gas 费用解析逻辑
+- 拒绝空文件上传
+- 代码层面进行了优化
+
+## 5.0.0
+
+- 移除 blob 上传，仅保留 calldata 上传
+- gas 参数改为 maxFeePerGas、maxPriorityFeePerGas、gasPrice
+- chunk 交易严格顺序发送
+- gas 估算更准确不会出现gas消耗过高的情况

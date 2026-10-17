@@ -14,7 +14,8 @@ import {
     stringToHex,
     stableRetry, getContentChunk,
     getUploadInfo, getChunkCounts,
-    getChunkHashes
+    getChunkHashes,
+    computeCalldataChunkBoundaries, EF_RESERVED_BYTES,
 } from "./utils";
 
 const defaultCallback: DownloadCallback = {
@@ -335,10 +336,19 @@ export class FlatDirectory {
             throw new Error(`FlatDirectory: Chunk size ${maxChunkSize} KB exceeds the on-chain max payload of ${CONTRACT_MAX_CHUNK_SIZE} bytes.`);
         }
 
-        const { chunkDataSize, calldataChunkCount } = this.#calculateCalldataChunkDetails(content, maxChunkSize);
+        const { chunkDataSize } = this.#calculateCalldataChunkDetails(content, maxChunkSize);
         if (chunkDataSize === -1) {
             throw new Error(`FlatDirectory: Invalid upload content!`);
         }
+
+        // Compute variable chunk boundaries so no chunk starts with the 0xEF
+        // magic byte (EIP-3541), which would make CREATE2 revert.
+        // The base size is reduced by EF_RESERVED_BYTES so that up to that many
+        // bytes can be absorbed into the current chunk without ever exceeding
+        // the original chunkDataSize (and thus the contract's maxChunkSize).
+        const baseChunkSize = Math.max(1, chunkDataSize - EF_RESERVED_BYTES);
+        const boundaries = await computeCalldataChunkBoundaries(content, baseChunkSize, chunkDataSize);
+        const calldataChunkCount = boundaries.length;
 
         const hexName = stringToHex(key);
         const fileContract = new ethers.Contract(this.#contractAddrChecked, FlatDirectoryAbi, this.#walletChecked) as any;
@@ -383,7 +393,8 @@ export class FlatDirectory {
             () => fileContract["writeChunkByCalldata"].estimateGas(hexName, chunkId, hexData)
         );
         for (let i = 0; i < calldataChunkCount; i++) {
-            const chunk = await getContentChunk(content, i * chunkDataSize, (i + 1) * chunkDataSize);
+            const { start, end } = boundaries[i];
+            const chunk = await getContentChunk(content, start, end);
 
             // not change
             if (i < chunkHashes.length && ethers.keccak256(chunk) === chunkHashes[i]) {
@@ -431,12 +442,21 @@ export class FlatDirectory {
             return;
         }
 
-        const { chunkDataSize, calldataChunkCount } = this.#calculateCalldataChunkDetails(content, maxChunkSize);
+        const { chunkDataSize } = this.#calculateCalldataChunkDetails(content, maxChunkSize);
         if (chunkDataSize === -1) {
             callback.onFail!(new Error(`FlatDirectory: Invalid upload content!`));
             callback.onFinish!(totalUploadChunks, totalUploadSize, totalCost);
             return;
         }
+
+        // Compute variable chunk boundaries so no chunk starts with the 0xEF
+        // magic byte (EIP-3541), which would make CREATE2 revert.
+        // The base size is reduced by EF_RESERVED_BYTES so that up to that many
+        // bytes can be absorbed into the current chunk without ever exceeding
+        // the original chunkDataSize (and thus the contract's maxChunkSize).
+        const baseChunkSize = Math.max(1, chunkDataSize - EF_RESERVED_BYTES);
+        const boundaries = await computeCalldataChunkBoundaries(content, baseChunkSize, chunkDataSize);
+        const calldataChunkCount = boundaries.length;
 
         const hexName = stringToHex(key);
         const fileContract = new ethers.Contract(this.#contractAddrChecked, FlatDirectoryAbi, this.#walletChecked);
@@ -484,7 +504,8 @@ export class FlatDirectory {
         }
 
         for (let i = 0; i < calldataChunkCount; i++) {
-            const chunk = await getContentChunk(content, i * chunkDataSize, (i + 1) * chunkDataSize);
+            const { start, end } = boundaries[i];
+            const chunk = await getContentChunk(content, start, end);
 
             // not change
             if (i < chunkHashes.length && ethers.keccak256(chunk) === chunkHashes[i]) {

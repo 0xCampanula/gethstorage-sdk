@@ -1,6 +1,6 @@
 {
   "name": "gethstorage-sdk",
-  "version": "5.0.2",
+  "version": "5.0.3",
   "description": "EthStorage flat directory upload sdk (calldata only)",
   "files": [
     "dist"
